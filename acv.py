@@ -7,6 +7,55 @@ import mediapipe as mp
 mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
+mp_selfie_segmentation = mp.solutions.selfie_segmentation
+
+
+BG_COLOR = (192, 192, 192) # gray
+
+def fond(image):
+    with mp_selfie_segmentation.SelfieSegmentation(
+        model_selection=1) as selfie_segmentation:
+
+        bg_image = cv2.imread('fond.jpg')
+        bg_image = cv2.resize(bg_image,(image.shape[1],image.shape[0])) 
+        # Flip the image horizontally for a later selfie-view display, and convert
+        # the BGR image to RGB.
+        image = cv2.cvtColor(cv2.flip(image, 1), cv2.COLOR_BGR2RGB)
+        # To improve performance, optionally mark the image as not writeable to
+        # pass by reference.
+        image.flags.writeable = False
+        results = selfie_segmentation.process(image)
+
+        image.flags.writeable = True
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+        # Draw selfie segmentation on the background image.
+        # To improve segmentation around boundaries, consider applying a joint
+        # bilateral filter to "results.segmentation_mask" with "image".
+        condition = np.stack(
+            (results.segmentation_mask,) * 3, axis=-1) > 0.1
+        # The background can be customized.
+        #   a) Load an image (with the same width and height of the input image) to
+        #      be the background, e.g., bg_image = cv2.imread('/path/to/image/file')
+        #   b) Blur the input image by applying image filtering, e.g.,
+        #      bg_image = cv2.GaussianBlur(image,(55,55),0)
+        if bg_image is None:
+            bg_image = np.zeros(image.shape, dtype=np.uint8)
+            bg_image[:] = BG_COLOR
+        output_image = np.where(condition, image, bg_image)
+    return output_image
+
+
+
+def cartoonify(image):
+    tublur = cv2.medianBlur(image, 29)
+
+    # We'll cover Canny edge detection and dilation shortly
+    edge = cv2.Canny(tublur, 10, 150)
+    kernel = np.ones((5,5), np.uint8)
+    edge = cv2.dilate(edge, kernel, iterations = 1)
+    tublur[edge==255] = 0
+    return tublur
 
 def sidebyside(imageleft,imageright):
     newimheight = max(imageleft.shape[0],imageright.shape[0])
@@ -17,11 +66,11 @@ def sidebyside(imageleft,imageright):
     return newim
 
 def filtre_gray(image):
-    femme_gray = image.copy()
-    femme_gray[:,:,0] = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-    femme_gray[:,:,1] = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-    femme_gray[:,:,2] = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-    return femme_gray
+    img_2 = image.copy()
+    img_2[:,:,0] = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+    img_2[:,:,1] = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+    img_2[:,:,2] = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+    return img_2
 
 def sepia(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -64,6 +113,43 @@ def blurring_face(img):
                 
     return img_blur 
 
+def face_swap(img):
+    # ksize
+    ksize = (25, 25)
+    #img = cv2.imread(img)
+    img_blur = img.copy()
+
+    with mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=2, min_detection_confidence=0.5) as face_mesh:
+        results = face_mesh.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        if results.multi_face_landmarks:
+            if len(results.multi_face_landmarks) >= 2:
+                f1_max_x = int(max([i.x for i in results.multi_face_landmarks[0].landmark]) * img.shape[1])
+                f1_min_x = int(min([i.x for i in results.multi_face_landmarks[0].landmark]) * img.shape[1])
+
+                f1_max_y = int(max([i.y for i in results.multi_face_landmarks[0].landmark]) * img.shape[0])
+                f1_min_y = int(min([i.y for i in results.multi_face_landmarks[0].landmark]) * img.shape[0])
+
+                f2_max_x = int(max([i.x for i in results.multi_face_landmarks[1].landmark]) * img.shape[1])
+                f2_min_x = int(min([i.x for i in results.multi_face_landmarks[1].landmark]) * img.shape[1])
+
+                f2_max_y = int(max([i.y for i in results.multi_face_landmarks[1].landmark]) * img.shape[0])
+                f2_min_y = int(min([i.y for i in results.multi_face_landmarks[1].landmark]) * img.shape[0])
+                
+                #plt.imshow(img_blur[f1_min_y:f1_max_y,f1_min_x:f1_max_x,:])
+                if f1_max_x < img.shape[1] and f1_min_x > 0 and f1_max_y < img.shape[0] and f1_min_y > 0 and f2_max_x < img.shape[1] and f2_min_x > 0 and f2_max_y < img.shape[0] and f2_min_y > 0:
+                    face1 = img_blur[f1_min_y:f1_max_y,f1_min_x:f1_max_x,:].copy()
+                    face1_bis = img_blur[f1_min_y:f1_max_y,f1_min_x:f1_max_x,:].copy()
+                    face2 = img_blur[f2_min_y:f2_max_y,f2_min_x:f2_max_x,:].copy()
+                    
+                    face1 = cv2.resize(face2, (face1.shape[1],face1.shape[0])).copy()
+                    face2 = cv2.resize(face1_bis, (face2.shape[1],face2.shape[0]))
+                    
+                    img_blur[f1_min_y:f1_max_y,f1_min_x:f1_max_x,:] = face1
+                    img_blur[f2_min_y:f2_max_y,f2_min_x:f2_max_x,:] = face2
+                
+        return img_blur
+                
+
 def ajout_texte(image, filtre):
     font = cv2.FONT_HERSHEY_SIMPLEX
     img = image.copy()
@@ -80,7 +166,7 @@ def appel_filtre(image, filtre):
         return ajout_texte(sepia(image),filtre)
     elif filtre == 'ears':
         return ajout_texte(lens_filter(image,'./doggy_ears.png'),filtre)
-    elif filtre == 'blur':
+    elif filtre == 'blurring':
         return ajout_texte(blurring_face(image),filtre)
     elif filtre == 'face landmarks':
         return ajout_texte(draw_face_landmarks(image),filtre)
@@ -88,6 +174,12 @@ def appel_filtre(image, filtre):
         return ajout_texte(shapening(image),filtre)
     elif filtre == 'upSideDown':
         return ajout_texte(upSideDown(image),filtre)
+    elif filtre == 'cartoonify':
+        return ajout_texte(cartoonify(image),filtre)
+    elif filtre == 'face_swap':
+        return ajout_texte(face_swap(image),filtre)
+    elif filtre == 'fond':
+        return ajout_texte(fond(image),filtre)
 
 def quadrillage(image,filtres):
     newimheight = image.shape[0]*3
@@ -103,7 +195,6 @@ def quadrillage(image,filtres):
 
 
 def get_face_landmarks(img):
-   
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(img)  
     return results
@@ -112,15 +203,13 @@ def upSideDown(img):
     return cv2.flip(img, 0)
     
 
-def compute_angle(point1, point2):
-    
+def compute_angle(point1, point2):  
     x1, y1, x2, y2 = point1[0], point1[1], point2[0], point2[1]
     angle = -180/math.pi * math.atan(float(y2-y1)/float(x2-x1))
     
     return angle
 
 def blend_img_with_overlay(img, overlay_img, blending_pos_x, blending_pos_y):
-
     img_h, img_w = img.shape[:2]
     over_h, over_w = overlay_img.shape[:2]
 
@@ -222,10 +311,9 @@ def draw_face_landmarks(img):
                                       .get_default_face_mesh_tesselation_style())
     return new_img
 
-
 cam = cv2.VideoCapture(0)
-
-filtres = ['miroir','gray','none','sepia','ears','blur','face landmarks','shapening','upSideDown']
+#shapening
+filtres = ['miroir','gray','cartoonify','face_swap','fond','blurring','face landmarks','ears','upSideDown']
 
 with mp_face_mesh.FaceMesh(max_num_faces = 1,
                           min_detection_confidence = 0.5,
@@ -239,6 +327,7 @@ with mp_face_mesh.FaceMesh(max_num_faces = 1,
         cv2.namedWindow('Webcam', cv2.WINDOW_GUI_NORMAL)
 
         cv2.imshow('Webcam', quadrillage(frame,filtres))
+        #cv2.imshow('Webcam',face_swap(frame))
         #cv2.imshow('webcam',frame)
         #cv2.imshow('Doggy ears', lens_filter(frame,'./doggy_ears.png'))
         #cv2.imshow('Sharpen',shapening(frame))  
